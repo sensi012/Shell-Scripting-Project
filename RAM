@@ -1,0 +1,76 @@
+#!/bin/bash
+
+###########################################################
+# Author: Isaiah Adepegba
+# Version: v1.0.0
+# This script will automate Disk + RAM + Automated Backups
+############################################################
+
+`
+# ---- CONFIGURATION ----
+LOG_FILE="/var/log/disk_monitor.log"
+TO="your_mail@gmail.com"
+DISK_THRESHOLD=80
+RAM_THRESHOLD=500
+
+SOURCE_DIR="$HOME/Documents"
+BACKUP_DIR="/mnt/backups/tar_archives" # Fixed: Added leading slash for absolute path
+`
+
+`
+# ---- STEP 1: EXECUTE COMPRESSED BACKUP ----
+mkdir -p "$BACKUP_DIR"
+TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
+BACKUP_FILE="backup_$TIMESTAMP.tar.gz"
+
+echo "Starting tar backup of $SOURCE_DIR..."
+tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C "$SOURCE_DIR" . --warning=no-file-changed
+BACKUP_STATUS=$?
+`
+
+`
+# ---- STEP 2: GATHER SYSTEM METRICS ----
+TARGET_PARTITION="sda2"
+if ! df -H | grep -q "$TARGET_PARTITION"; then
+    TARGET_PARTITION=$(df / | awk 'NR==2 {print $1}' | sed 's/.*\/\|\/dev\///')
+fi
+
+FU=$(df -H | egrep -v "Filesystem|tmpfs" | grep "$TARGET_PARTITION" | awk '{print $5}' | tr -d %)
+FREE_RAM=$(free -mt | grep Total | awk '{print $4}')
+LOG_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+`
+
+`
+# ---- STEP 3: LOG & EVALUATE BACKUP STATUS ----
+if [ $BACKUP_STATUS -eq 0 ]
+then
+    echo "[$LOG_TIME] SUCCESS: Backup saved to $BACKUP_DIR/$BACKUP_FILE" >> "$LOG_FILE"
+else
+    BACKUP_ALERT="Backup FAILED for $SOURCE_DIR at $LOG_TIME"
+    echo "[$LOG_TIME] CRITICAL: $BACKUP_ALERT" >> "$LOG_FILE"
+    echo "$BACKUP_ALERT" | mail -s "BACKUP FAILURE ALERT" "$TO"
+fi
+`
+
+`
+# ---- STEP 4: EVALUATE SYSTEM HEALTH ----
+if [[ $FU -ge $DISK_THRESHOLD ]]
+then
+    DISK_ALERT="Warning, disk space is low - $FU % on $TARGET_PARTITION"
+    echo "[$LOG_TIME] ALERT: $DISK_ALERT" >> "$LOG_FILE"
+    echo "$DISK_ALERT" | mail -s "DISK SPACE ALERT IN SERVER" "$TO"
+else
+    echo "[$LOG_TIME] OK: Disk space sufficient - $FU %" >> "$LOG_FILE"
+fi
+
+if [[ $FREE_RAM -lt $RAM_THRESHOLD ]]
+then
+    RAM_ALERT="Warning, RAM is running low - Only ${FREE_RAM}M available"
+    echo "[$LOG_TIME] ALERT: $RAM_ALERT" >> "$LOG_FILE"
+    echo "$RAM_ALERT" | mail -s "RAM SPACE ALERT IN SERVER" "$TO"
+else
+    echo "[$LOG_TIME] OK: RAM space sufficient - ${FREE_RAM}M" >> "$LOG_FILE"
+fi
+
+echo "All tasks complete. Status logged to $LOG_FILE"
+`
